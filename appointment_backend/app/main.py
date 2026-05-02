@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import admin, appointments, auth, bookings, reports, resources, users
+from app.api.routes import admin, appointments, auth, bookings, payments_webhook, reports, resources, users
 from app.core.config import get_settings
 from app.db import close_pool, create_pool
 
@@ -46,6 +46,12 @@ async def validation_handler(request: Request, exc: RequestValidationError):
     return JSONResponse({"success": False, "message": msg}, status_code=422)
 
 
+@app.exception_handler(Exception)
+async def unhandled_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled API error on %s %s", request.method, request.url.path)
+    return JSONResponse({"success": False, "message": "Unexpected server error"}, status_code=500)
+
+
 @app.get("/health")
 async def health():
     return {"ok": True}
@@ -57,5 +63,6 @@ app.include_router(users.router, prefix=f"/{api}")
 app.include_router(appointments.router, prefix=f"/{api}")
 app.include_router(resources.router, prefix=f"/{api}")
 app.include_router(bookings.router, prefix=f"/{api}")
+app.include_router(payments_webhook.router, prefix=f"/{api}")
 app.include_router(admin.router, prefix=f"/{api}")
 app.include_router(reports.router, prefix=f"/{api}")

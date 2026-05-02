@@ -44,7 +44,7 @@ export default function App() {
         <Route path="/organiser" element={<DashboardPage />} />
         <Route path="/organiser/new" element={<CreateAppointmentPage />} />
         <Route path="/organiser/edit/:id" element={<EditAppointmentPage />} />
-        <Route path="/organiser/resources/:id" element={<ManageResourcesPage />} />
+        <Route path="/organiser/appointments/:appointmentTypeId/resources" element={<ManageResourcesPage />} />
         <Route path="/organiser/resources/:id/hours" element={<WorkingHoursPage />} />
         <Route path="/organiser/bookings/:appointmentTypeId" element={<BookingsListPage />} />
         <Route path="/organiser/reports" element={<ReportsPage />} />

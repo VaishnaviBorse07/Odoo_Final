@@ -3,7 +3,7 @@ import secrets
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_token_user, optional_user, require_roles
 from app.core.responses import err_json, ok_json
@@ -204,8 +204,8 @@ class CreateAppointment(BaseModel):
     slot_type: str = "weekly"
     max_capacity: int = 1
     manage_capacity: bool = False
-    advance_payment: bool = False
-    payment_amount: float = 0
+    # Customer must pay this INR amount (min ₹1) via Razorpay to confirm a booking.
+    payment_amount: float = Field(..., ge=1)
     confirmation_type: str = "automatic"
     assignment_type: str = "auto"
 
@@ -220,7 +220,7 @@ async def create(body: CreateAppointment, user: dict = Depends(require_roles("or
               organiser_id, name, description, duration_minutes, location, status,
               slot_type, max_capacity, manage_capacity, advance_payment, payment_amount,
               confirmation_type, assignment_type, share_token
-            ) VALUES ($1,$2,$3,$4,$5,'draft',$6::slot_type,$7,$8,$9,$10,$11::confirmation_type,$12::assignment_type,$13)
+            ) VALUES ($1,$2,$3,$4,$5,'draft',$6::slot_type,$7,$8,TRUE,$9,$10::confirmation_type,$11::assignment_type,$12)
             RETURNING id
             """,
             user["id"],
@@ -231,7 +231,6 @@ async def create(body: CreateAppointment, user: dict = Depends(require_roles("or
             body.slot_type,
             body.max_capacity,
             body.manage_capacity,
-            body.advance_payment,
             body.payment_amount,
             body.confirmation_type,
             body.assignment_type,
@@ -249,8 +248,7 @@ class UpdateAppointment(BaseModel):
     slot_type: Optional[str] = None
     max_capacity: Optional[int] = None
     manage_capacity: Optional[bool] = None
-    advance_payment: Optional[bool] = None
-    payment_amount: Optional[float] = None
+    payment_amount: Optional[float] = Field(default=None, ge=1)
     confirmation_type: Optional[str] = None
     assignment_type: Optional[str] = None
 
@@ -278,7 +276,6 @@ async def update(apt_id: int, body: UpdateAppointment, user: dict = Depends(requ
             ("slot_type", "slot_type"),
             ("max_capacity", "int"),
             ("manage_capacity", "bool"),
-            ("advance_payment", "bool"),
             ("payment_amount", "numeric"),
             ("confirmation_type", "confirmation_type"),
             ("assignment_type", "assignment_type"),
@@ -288,6 +285,10 @@ async def update(apt_id: int, body: UpdateAppointment, user: dict = Depends(requ
                 continue
             fields.append(f"{key} = ${i}::{cast}")
             vals.append(d[key])
+            i += 1
+        if "payment_amount" in d:
+            fields.append(f"advance_payment = ${i}::bool")
+            vals.append(True)
             i += 1
         vals.append(apt_id)
         await conn.execute(
@@ -312,6 +313,16 @@ async def patch_status(apt_id: int, body: StatusBody, user: dict = Depends(requi
             return err_json("Not found", 404)
         if not ok:
             return err_json("Forbidden", 403)
+        if body.status == "published":
+            chk = await conn.fetchrow(
+                "SELECT advance_payment, payment_amount FROM appointment_types WHERE id = $1",
+                apt_id,
+            )
+            if not chk or not chk["advance_payment"] or float(chk["payment_amount"] or 0) < 1:
+                return err_json(
+                    "Set a customer booking fee of at least ₹1 before publishing (fee is required for all classes).",
+                    400,
+                )
         await conn.execute(
             "UPDATE appointment_types SET status = $1::appointment_status WHERE id = $2",
             body.status,

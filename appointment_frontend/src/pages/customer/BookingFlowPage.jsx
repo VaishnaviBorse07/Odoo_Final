@@ -8,6 +8,13 @@ import { useToast } from '../../components/Toast.jsx';
 import { useAuth } from '../../hooks/useAuth.js';
 import { completeBookingPayment } from '../../utils/completeBookingPayment.js';
 
+function bookingErrorMessage(err) {
+  if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') {
+    return 'Backend API is not reachable. Start the backend on port 8000, then try again.';
+  }
+  return err.response?.data?.message || err.message || 'Booking failed';
+}
+
 export default function BookingFlowPage() {
   const { appointmentTypeId, token } = useParams();
   const nav = useNavigate();
@@ -74,16 +81,26 @@ export default function BookingFlowPage() {
       });
       const booking = data.data;
       if (withPay && booking.payment_status === 'pending') {
-        const paid = await completeBookingPayment(booking, {
-          email: user?.email,
-          description: apt.name
-        });
-        nav('/booking/confirm', { state: { booking: paid } });
+        try {
+          const paid = await completeBookingPayment(booking, {
+            email: user?.email,
+            description: apt.name
+          });
+          nav('/booking/confirm', { state: { booking: paid } });
+        } catch (payErr) {
+          show(
+            payErr.response?.data?.message ||
+              payErr.message ||
+              'Payment could not be completed. Your booking is saved as pending — try again from My Bookings.',
+            'error'
+          );
+          nav('/booking/confirm', { state: { booking } });
+        }
       } else {
         nav('/booking/confirm', { state: { booking } });
       }
     } catch (err) {
-      show(err.response?.data?.message || err.message || 'Booking failed', 'error');
+      show(bookingErrorMessage(err), 'error');
     } finally {
       setSubmitting(false);
     }

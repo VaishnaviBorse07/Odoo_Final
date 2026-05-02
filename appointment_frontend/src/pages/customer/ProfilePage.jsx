@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/useAuth.js';
 import { completeBookingPayment } from '../../utils/completeBookingPayment.js';
 import BookingCard from '../../components/BookingCard.jsx';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
+import RescheduleBookingDialog from '../../components/RescheduleBookingDialog.jsx';
 import { useToast } from '../../components/Toast.jsx';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../../components/LoadingSpinner.jsx';
@@ -20,6 +21,7 @@ export default function ProfilePage() {
   const [name, setName] = useState(user?.full_name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [cancelId, setCancelId] = useState(null);
+  const [rescheduleBooking, setRescheduleBooking] = useState(null);
 
   const load = async () => {
     const { data } = await api.get('/bookings/my');
@@ -150,6 +152,7 @@ export default function ProfilePage() {
                   booking={b}
                   showActions={tab === 'upcoming'}
                   onPay={pay}
+                  onReschedule={(x) => setRescheduleBooking(x)}
                   onCancel={(x) => setCancelId(x.booking_id)}
                 />
               ))}
@@ -167,6 +170,13 @@ export default function ProfilePage() {
         onCancel={() => setCancelId(null)}
         onConfirm={cancelBooking}
         confirmLabel="Cancel booking"
+      />
+      <RescheduleBookingDialog
+        open={Boolean(rescheduleBooking)}
+        booking={rescheduleBooking}
+        onClose={() => setRescheduleBooking(null)}
+        onDone={load}
+        showToast={show}
       />
     </div>
   );

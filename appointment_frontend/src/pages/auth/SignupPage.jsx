@@ -37,8 +37,8 @@ export default function SignupPage() {
     setLoading(true);
     try {
       const { data } = await api.post('/auth/signup', { full_name: full_name.trim(), email, password });
-      const devOtp = data.data?.otp_code;
-      nav('/verify-otp', { state: { email, devOtp } });
+      const devOtp = data.data?.otp_code || '';
+      nav('/verify-otp', { state: { email, ...(devOtp ? { devOtp } : {}) } });
     } catch (err) {
       setErrors({ form: err.response?.data?.message || 'Signup failed' });
     } finally {

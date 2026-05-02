@@ -1,4 +1,4 @@
-// Mock pay or Razorpay order + verify — returns updated booking object from API data.
+// Razorpay order + verify — booking fee is mandatory when the class requires payment.
 import api from '../api/axios.js';
 import { payWithRazorpay } from './razorpayCheckout.js';
 
@@ -12,13 +12,12 @@ function bookingNumericId(booking) {
  */
 export async function completeBookingPayment(booking, meta = {}) {
   const id = bookingNumericId(booking);
-  const key = import.meta.env.VITE_RAZORPAY_KEY_ID;
-  if (!key) {
-    const { data } = await api.put(`/bookings/${id}/pay`, {});
-    return data.data;
-  }
   const { data: ordRes } = await api.post(`/bookings/${id}/razorpay-order`);
   const o = ordRes.data;
+  const key = o.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
+  if (!key) {
+    throw new Error('Payment gateway is not configured (missing key from server or VITE_RAZORPAY_KEY_ID).');
+  }
   const resp = await payWithRazorpay({
     key,
     orderId: o.order_id,

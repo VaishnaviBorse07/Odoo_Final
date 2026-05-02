@@ -22,6 +22,8 @@ export default function OTPVerifyPage() {
     const o = loc.state?.devOtp;
     if (o && String(o).length === 6) {
       setDigits(String(o).split(''));
+    } else {
+      setDigits(['', '', '', '', '', '']);
     }
   }, [loc.state?.devOtp]);
 
@@ -67,8 +69,8 @@ export default function OTPVerifyPage() {
         <p className="mt-2 text-sm text-zen-muted">Code sent to {email}</p>
         {devOtpHint && (
           <p className="mt-3 rounded-control bg-amber-50 px-3 py-2 text-xs text-amber-950">
-            Local server (no email): OTP is <strong className="tracking-widest">{devOtpHint}</strong>. In production,
-            turn off <code className="rounded bg-white px-1">DEV_RETURN_OTP</code> and deliver codes out-of-band.
+            Dev only (<code className="rounded bg-white px-1">DEV_RETURN_OTP=true</code>): code{' '}
+            <strong className="tracking-widest">{devOtpHint}</strong>
           </p>
         )}
         <div className="mt-6">

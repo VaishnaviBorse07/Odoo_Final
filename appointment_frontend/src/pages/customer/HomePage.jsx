@@ -48,9 +48,18 @@ export default function HomePage() {
       <Navbar />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="rounded-card bg-gradient-to-r from-zen-secondary to-white p-6 shadow-sm">
-          <h1 className="text-2xl font-extrabold text-zen-ink">
-            {greet}, {user?.full_name}. Ready for your practice?
-          </h1>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-2xl font-extrabold text-zen-ink">
+              {greet}, {user?.full_name}. Ready for your practice?
+            </h1>
+            <button
+              type="button"
+              onClick={() => document.getElementById('browse-classes')?.scrollIntoView({ behavior: 'smooth' })}
+              className="rounded-control bg-zen-primary px-5 py-2.5 text-sm font-bold text-white shadow hover:bg-zen-accent"
+            >
+              Book a class
+            </button>
+          </div>
         </div>
         <div className="mt-6">
           <input
@@ -79,7 +88,7 @@ export default function HomePage() {
             <LoadingSpinner size="lg" />
           </div>
         ) : (
-          <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          <div id="browse-classes" className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {filtered.length === 0 ? (
               <p className="text-zen-muted">No classes found. Try a different search.</p>
             ) : (

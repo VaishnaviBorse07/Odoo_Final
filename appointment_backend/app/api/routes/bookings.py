@@ -1,6 +1,9 @@
 # Booking creation, slots, customer/organiser flows — exports router.
+import calendar
+import json
 import secrets
-from datetime import date as date_type
+from datetime import date as date_type, time as time_type
+from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -11,9 +14,14 @@ from app.core.config import Settings
 from app.core.responses import err_json, ok_json
 from app.core.serialize import record_to_dict, records_to_dicts
 from app.db import pool
+from app.services.booking_payment import apply_successful_payment
 from app.services.slot_engine import generate_flexible_slots, generate_weekly_slots
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
+
+
+def _parse_time(value: str) -> time_type:
+    return time_type.fromisoformat(str(value)[:8])
 
 
 @router.get("/slots")
@@ -38,6 +46,41 @@ async def slots(
     return ok_json({"slots": arr})
 
 
+@router.get("/slot-calendar")
+async def slot_calendar(
+    appointmentTypeId: int = Query(...),
+    resourceId: int = Query(...),
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    user: dict = Depends(get_token_user),
+):
+    """Per-day count of bookable slots for the month (same rules as GET /slots)."""
+    today = date_type.today()
+    _, last = calendar.monthrange(year, month)
+    counts: dict[str, int] = {}
+    async with pool().acquire() as conn:
+        apt = await conn.fetchrow(
+            "SELECT id, slot_type, duration_minutes FROM appointment_types WHERE id = $1",
+            appointmentTypeId,
+        )
+        if not apt:
+            return err_json("Appointment not found", 404)
+        for day in range(1, last + 1):
+            d = date_type(year, month, day)
+            key = d.isoformat()
+            if d < today:
+                counts[key] = 0
+                continue
+            if apt["slot_type"] == "weekly":
+                arr = await generate_weekly_slots(
+                    conn, resourceId, d, apt["duration_minutes"], appointmentTypeId
+                )
+            else:
+                arr = await generate_flexible_slots(conn, resourceId, d, appointmentTypeId)
+            counts[key] = sum(1 for s in arr if s.get("available"))
+    return ok_json({"counts": counts})
+
+
 class AnswerItem(BaseModel):
     question_id: int
     answer_text: str = ""
@@ -57,6 +100,10 @@ class CreateBooking(BaseModel):
 async def create_booking(body: CreateBooking, user: dict = Depends(require_roles("customer"))):
     cap = max(1, int(body.capacity_booked or 1))
     bd = date_type.fromisoformat(body.booking_date[:10])
+    st = _parse_time(body.start_time)
+    et = _parse_time(body.end_time)
+    if et <= st:
+        return err_json("Invalid booking time range", 400)
     async with pool().acquire() as conn:
         async with conn.transaction():
             apt = await conn.fetchrow(
@@ -88,8 +135,8 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
                     """,
                     body.resource_id,
                     bd,
-                    body.end_time,
-                    body.start_time,
+                    et,
+                    st,
                 )
                 if int(booked_sum) + cap > (apt["max_capacity"] or 1):
                     return err_json("Not enough spots available for the requested capacity", 409)
@@ -100,20 +147,22 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
                 """,
                 body.resource_id,
                 bd,
-                body.start_time,
-                body.end_time,
+                st,
+                et,
                 body.appointment_type_id,
                 cap,
             )
             if not ok_slot:
                 return err_json("This slot is no longer available. Please choose another slot.", 409)
-            status = "confirmed" if apt["confirmation_type"] == "automatic" else "pending"
             if apt["advance_payment"]:
                 pay_stat = "pending"
                 pay_amt = float(apt["payment_amount"] or 0)
+                # Payment is mandatory before confirmation — stay pending until Razorpay succeeds.
+                status = "pending"
             else:
                 pay_stat = "not_required"
                 pay_amt = 0.0
+                status = "confirmed" if apt["confirmation_type"] == "automatic" else "pending"
             bid = await conn.fetchval(
                 """
                 INSERT INTO bookings (
@@ -126,8 +175,8 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
                 body.resource_id,
                 user["id"],
                 bd,
-                body.start_time,
-                body.end_time,
+                st,
+                et,
                 status,
                 cap,
                 pay_stat,
@@ -143,8 +192,17 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
                     a.question_id,
                     a.answer_text or "",
                 )
-            row = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", bid)
-    return ok_json(record_to_dict(row), "Booked", 201)
+            detail = await conn.fetchrow(
+                "SELECT * FROM v_booking_details WHERE booking_id = $1",
+                bid,
+            )
+        if detail:
+            payload = record_to_dict(detail)
+        else:
+            row_fallback = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", bid)
+            payload = record_to_dict(row_fallback) if row_fallback else {}
+        payload["id"] = bid
+    return ok_json(payload, "Booked", 201)
 
 
 def _razorpay_client(settings: Settings):
@@ -181,7 +239,7 @@ async def razorpay_order(
             return err_json("No payment pending for this booking", 400)
         paise = int(round(float(row["payment_amount"] or 0) * 100))
         if paise < 100:
-            return err_json("Amount below ₹1 — use mock pay or adjust booking amount", 400)
+            return err_json("Booking fee must be at least ₹1 for online payment", 400)
         receipt = f"zf{booking_id}_{secrets.token_hex(3)}"[:40]
         try:
             order = client.order.create(
@@ -197,6 +255,18 @@ async def razorpay_order(
             )
         except Exception as exc:
             return err_json(f"Could not create Razorpay order: {exc}", 502)
+        await conn.execute("DELETE FROM payments WHERE booking_id = $1 AND status = 'CREATED'", booking_id)
+        await conn.execute(
+            """
+            INSERT INTO payments (booking_id, order_id, amount, currency, status, customer_id, raw_response)
+            VALUES ($1, $2, $3, 'INR', 'CREATED', $4, $5::jsonb)
+            """,
+            booking_id,
+            order["id"],
+            Decimal(str(row["payment_amount"] or 0)),
+            user["id"],
+            json.dumps(order),
+        )
     return ok_json(
         {
             "key_id": settings.razorpay_key_id,
@@ -233,6 +303,18 @@ async def razorpay_verify(
         )
     except Exception:
         return err_json("Invalid or expired payment confirmation", 400)
+    try:
+        pay_entity = client.payment.fetch(body.razorpay_payment_id)
+    except Exception:
+        return err_json("Could not load payment from Razorpay", 502)
+    if str(pay_entity.get("order_id") or "") != body.razorpay_order_id:
+        return err_json("Payment does not match order", 400)
+    amount_paise = int(pay_entity.get("amount") or 0)
+    raw_verify = {
+        "source": "api_verify",
+        "payment": pay_entity,
+        "order_id": body.razorpay_order_id,
+    }
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
             "SELECT id, customer_id, payment_status FROM bookings WHERE id = $1",
@@ -240,10 +322,18 @@ async def razorpay_verify(
         )
         if not row or row["customer_id"] != user["id"]:
             return err_json("Not found", 404)
-        if row["payment_status"] == "pending":
-            await conn.execute("UPDATE bookings SET payment_status = 'paid' WHERE id = $1", booking_id)
-        out = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id)
-    return ok_json(record_to_dict(out))
+        async with conn.transaction():
+            out_dict = await apply_successful_payment(
+                conn,
+                booking_id=booking_id,
+                razorpay_order_id=body.razorpay_order_id,
+                razorpay_payment_id=body.razorpay_payment_id,
+                amount_paise_from_gateway=amount_paise,
+                raw_payload=raw_verify,
+            )
+        if out_dict is None:
+            return err_json("Payment could not be applied to this booking (amount or order mismatch)", 400)
+    return ok_json(record_to_dict(out_dict))
 
 
 @router.get("/my")
@@ -266,6 +356,52 @@ async def my_bookings(user: dict = Depends(require_roles("customer"))):
     upcoming.sort(key=lambda x: (x["booking_date"], str(x["start_time"])))
     past.sort(key=lambda x: (x["booking_date"], str(x["start_time"])), reverse=True)
     return ok_json({"upcoming": upcoming, "past": past})
+
+
+@router.get("/organiser-calendar")
+async def organiser_calendar(
+    year: int = Query(..., ge=2000, le=2100),
+    month: int = Query(..., ge=1, le=12),
+    user: dict = Depends(require_roles("organiser", "admin")),
+):
+    """Month view: non-cancelled bookings for the organiser's classes (admin: all)."""
+    first = date_type(year, month, 1)
+    last_day = calendar.monthrange(year, month)[1]
+    last = date_type(year, month, last_day)
+    async with pool().acquire() as conn:
+        if user["role"] == "admin":
+            rows = await conn.fetch(
+                """
+                SELECT b.id AS booking_id, b.booking_date, b.start_time, b.end_time,
+                       b.status::text AS booking_status, at.name AS service_name, c.full_name AS customer_name
+                FROM bookings b
+                JOIN appointment_types at ON at.id = b.appointment_type_id
+                JOIN users c ON c.id = b.customer_id
+                WHERE b.booking_date >= $1 AND b.booking_date <= $2
+                  AND b.status <> 'cancelled'
+                ORDER BY b.booking_date, b.start_time
+                """,
+                first,
+                last,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT b.id AS booking_id, b.booking_date, b.start_time, b.end_time,
+                       b.status::text AS booking_status, at.name AS service_name, c.full_name AS customer_name
+                FROM bookings b
+                JOIN appointment_types at ON at.id = b.appointment_type_id
+                JOIN users c ON c.id = b.customer_id
+                WHERE at.organiser_id = $1
+                  AND b.booking_date >= $2 AND b.booking_date <= $3
+                  AND b.status <> 'cancelled'
+                ORDER BY b.booking_date, b.start_time
+                """,
+                user["id"],
+                first,
+                last,
+            )
+    return ok_json({"events": records_to_dicts(list(rows))})
 
 
 @router.get("/appointment/{appointment_type_id}")
@@ -357,7 +493,11 @@ async def one_booking(booking_id: int, user: dict = Depends(get_token_user)):
             """,
             booking_id,
         )
-        base = record_to_dict(await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id))
+        detail = await conn.fetchrow("SELECT * FROM v_booking_details WHERE booking_id = $1", booking_id)
+        base = record_to_dict(detail) if detail else record_to_dict(
+            await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id)
+        )
+        base["id"] = booking_id
         base["answers"] = records_to_dicts(list(answers))
     return ok_json(base)
 
@@ -371,12 +511,16 @@ class RescheduleBody(BaseModel):
 @router.put("/{booking_id}/reschedule")
 async def reschedule(booking_id: int, body: RescheduleBody, user: dict = Depends(require_roles("customer"))):
     nd = date_type.fromisoformat(body.new_date[:10])
+    new_start = _parse_time(body.new_start_time)
+    new_end = _parse_time(body.new_end_time)
+    if new_end <= new_start:
+        return err_json("Invalid reschedule time range", 400)
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await _fetch_booking_with_org(conn, booking_id)
             if not row or row["customer_id"] != user["id"]:
                 return err_json("Not found", 404)
-            if row["status"] not in ("confirmed", "pending"):
+            if row["status"] not in ("confirmed", "pending", "rescheduled"):
                 return err_json("Cannot reschedule this booking", 400)
             cap = int(row["capacity_booked"] or 1)
             apt_id = row["appointment_type_id"]
@@ -387,8 +531,8 @@ async def reschedule(booking_id: int, body: RescheduleBody, user: dict = Depends
                 """,
                 row["resource_id"],
                 nd,
-                body.new_start_time,
-                body.new_end_time,
+                new_start,
+                new_end,
                 booking_id,
                 apt_id,
                 cap,
@@ -404,7 +548,7 @@ async def reschedule(booking_id: int, body: RescheduleBody, user: dict = Depends
                 row["booking_date"],
                 row["start_time"],
                 nd,
-                body.new_start_time,
+                new_start,
                 user["id"],
             )
             await conn.execute(
@@ -413,8 +557,8 @@ async def reschedule(booking_id: int, body: RescheduleBody, user: dict = Depends
                   status = 'rescheduled' WHERE id = $4
                 """,
                 nd,
-                body.new_start_time,
-                body.new_end_time,
+                new_start,
+                new_end,
                 booking_id,
             )
             out = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id)
@@ -455,13 +599,23 @@ async def cancel_booking(booking_id: int, body: CancelBody, user: dict = Depends
 @router.put("/{booking_id}/confirm")
 async def confirm_booking(booking_id: int, user: dict = Depends(require_roles("organiser", "admin"))):
     async with pool().acquire() as conn:
-        row = await _fetch_booking_with_org(conn, booking_id)
+        row = await conn.fetchrow(
+            """
+            SELECT b.*, at.organiser_id, at.advance_payment
+            FROM bookings b
+            JOIN appointment_types at ON at.id = b.appointment_type_id
+            WHERE b.id = $1
+            """,
+            booking_id,
+        )
         if not row:
             return err_json("Not found", 404)
         if user["role"] != "admin" and row["organiser_id"] != user["id"]:
             return err_json("Forbidden", 403)
         if row["status"] != "pending":
             return err_json("Booking is not pending", 400)
+        if row["advance_payment"] and row["payment_status"] != "paid":
+            return err_json("Customer payment is required before you can confirm this booking", 400)
         await conn.execute(
             "UPDATE bookings SET status = 'confirmed'::booking_status WHERE id = $1",
             booking_id,
@@ -489,21 +643,42 @@ async def complete_booking(booking_id: int, user: dict = Depends(require_roles("
 
 
 @router.put("/{booking_id}/pay")
-async def pay_booking(booking_id: int, user: dict = Depends(require_roles("customer"))):
+async def pay_booking(
+    booking_id: int,
+    user: dict = Depends(require_roles("customer")),
+    settings: Settings = Depends(get_settings_dep),
+):
     """
-    Mock settlement (no gateway): sets payment_status to paid. Used when Razorpay keys
-    are not set, or for quick demos. With Razorpay configured, the app uses
-    POST .../razorpay-order and POST .../razorpay-verify instead.
+    Mock settlement when Razorpay keys are not configured (local demos only).
     """
+    if settings.razorpay_key_id and settings.razorpay_key_secret:
+        return err_json("Use Razorpay checkout to complete payment on this environment", 400)
     async with pool().acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id)
+        row = await conn.fetchrow(
+            """
+            SELECT b.*, at.confirmation_type, at.advance_payment
+            FROM bookings b
+            JOIN appointment_types at ON at.id = b.appointment_type_id
+            WHERE b.id = $1
+            """,
+            booking_id,
+        )
         if not row or row["customer_id"] != user["id"]:
             return err_json("Not found", 404)
         if row["payment_status"] != "pending":
             return err_json("Payment not pending", 400)
+        target = (
+            "confirmed"
+            if row["advance_payment"] and row["confirmation_type"] == "automatic"
+            else row["status"]
+        )
         await conn.execute(
-            "UPDATE bookings SET payment_status = 'paid' WHERE id = $1",
+            """
+            UPDATE bookings SET payment_status = 'paid', status = $2::booking_status
+            WHERE id = $1 AND payment_status = 'pending'
+            """,
             booking_id,
+            target,
         )
         out = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id)
     return ok_json(record_to_dict(out))

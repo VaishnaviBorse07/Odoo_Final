@@ -16,6 +16,8 @@ export default function SlotPicker({ appointmentTypeId, resourceId, manageCapaci
   const [selectedDate, setSelectedDate] = useState(null);
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [monthCounts, setMonthCounts] = useState({});
+  const [countsLoading, setCountsLoading] = useState(false);
   const [picked, setPicked] = useState(null);
   const [capacity, setCapacity] = useState(1);
 
@@ -32,6 +34,30 @@ export default function SlotPicker({ appointmentTypeId, resourceId, manageCapaci
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  useEffect(() => {
+    if (!appointmentTypeId || !resourceId) {
+      setMonthCounts({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setCountsLoading(true);
+      try {
+        const { data } = await api.get('/bookings/slot-calendar', {
+          params: { appointmentTypeId, resourceId, year, month: month + 1 }
+        });
+        if (!cancelled) setMonthCounts(data.data?.counts || {});
+      } catch {
+        if (!cancelled) setMonthCounts({});
+      } finally {
+        if (!cancelled) setCountsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentTypeId, resourceId, year, month]);
 
   useEffect(() => {
     if (!selectedDate || !appointmentTypeId || !resourceId) return;
@@ -99,27 +125,50 @@ export default function SlotPicker({ appointmentTypeId, resourceId, manageCapaci
           {cells.map((d, idx) =>
             d == null ? (
               <div key={`e-${idx}`} />
-            ) : (
-              <button
-                key={d}
-                type="button"
-                disabled={new Date(year, month, d) < today}
-                onClick={() => {
-                  setSelectedDate(iso(d));
-                  setPicked(null);
-                  setCapacity(1);
-                }}
-                className={`rounded-control py-2 text-sm font-semibold ${
-                  selectedDate === iso(d)
-                    ? 'bg-zen-primary text-white'
-                    : new Date(year, month, d) < today
-                      ? 'cursor-not-allowed opacity-40'
-                      : 'border border-slate-200 hover:border-zen-primary'
-                } ${new Date(year, month, d).getTime() === today.getTime() ? 'ring-2 ring-zen-primary' : ''}`}
-              >
-                {d}
-              </button>
-            )
+            ) : (() => {
+              const cellDate = new Date(year, month, d);
+              const isPast = cellDate < today;
+              const id = iso(d);
+              const n = monthCounts[id] ?? 0;
+              const hasOpen = !isPast && n > 0;
+              const base =
+                selectedDate === id
+                  ? 'bg-zen-primary text-white ring-2 ring-zen-primary ring-offset-1'
+                  : isPast
+                    ? 'cursor-not-allowed opacity-40 border border-slate-100 bg-slate-50'
+                    : hasOpen
+                      ? 'border-2 border-emerald-500 bg-emerald-50 text-zen-ink hover:bg-emerald-100'
+                      : 'border border-slate-200 bg-white text-zen-muted hover:border-zen-primary';
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  disabled={isPast}
+                  onClick={() => {
+                    setSelectedDate(id);
+                    setPicked(null);
+                    setCapacity(1);
+                  }}
+                  className={`relative flex min-h-[3rem] flex-col items-center justify-center rounded-control py-1 text-sm font-semibold ${base} ${
+                    cellDate.getTime() === today.getTime() && selectedDate !== id ? 'ring-2 ring-zen-primary' : ''
+                  }`}
+                >
+                  <span>{d}</span>
+                  {!isPast && !countsLoading && (
+                    <span
+                      className={`mt-0.5 text-[10px] font-bold leading-none ${
+                        selectedDate === id ? 'text-white/90' : hasOpen ? 'text-emerald-700' : 'text-zen-muted'
+                      }`}
+                    >
+                      {n > 0 ? `${n} open` : '—'}
+                    </span>
+                  )}
+                  {!isPast && countsLoading && (
+                    <span className="mt-0.5 h-3 w-8 animate-pulse rounded bg-slate-200" aria-hidden />
+                  )}
+                </button>
+              );
+            })()
           )}
         </div>
       </div>

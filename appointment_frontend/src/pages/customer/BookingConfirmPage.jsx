@@ -1,12 +1,40 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Navbar from '../../components/Navbar.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
+import api from '../../api/axios.js';
+import { formatDateLabel, formatTimeRange } from '../../utils/dateFormat.js';
+import LoadingSpinner from '../../components/LoadingSpinner.jsx';
 
 export default function BookingConfirmPage() {
   const loc = useLocation();
-  const booking = loc.state?.booking;
+  const initial = loc.state?.booking;
+  const [detail, setDetail] = useState(initial || null);
+  const id = initial?.id ?? initial?.booking_id;
+  const [loading, setLoading] = useState(Boolean(id));
 
-  if (!booking) {
+  useEffect(() => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get(`/bookings/${id}`);
+        if (!cancelled) setDetail(data.data);
+      } catch {
+        if (!cancelled) setDetail(initial);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, initial]);
+
+  if (!initial && !id) {
     return (
       <div className="p-8 text-center">
         <p>No booking data.</p>
@@ -17,10 +45,17 @@ export default function BookingConfirmPage() {
     );
   }
 
-  const ref = String(booking.confirmation_token || '')
+  const b = detail || initial;
+  const ref = String(b.confirmation_token || '')
     .replace(/-/g, '')
     .slice(0, 8)
     .toUpperCase();
+
+  const dateStr = b.booking_date ? formatDateLabel(b.booking_date) : '—';
+  const timeStr =
+    b.start_time && b.end_time ? formatTimeRange(b.start_time, b.end_time) : '—';
+  const status = b.booking_status || b.status;
+  const pay = b.payment_status;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -31,14 +66,56 @@ export default function BookingConfirmPage() {
         </div>
         <style>{`@keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
         <h1 className="text-2xl font-extrabold text-zen-ink">
-          {booking.status === 'pending' ? 'Booking Submitted!' : 'Booking Confirmed!'}
+          {status === 'pending' ? 'Booking submitted' : 'Booking confirmed'}
         </h1>
-        <div className="mt-6 rounded-card bg-white p-6 text-left shadow">
-          <p className="text-sm text-zen-muted">Ref: {ref}</p>
-          <div className="mt-2">
-            <StatusBadge status={booking.status} />
+        <p className="mt-2 text-sm text-zen-muted">
+          {pay === 'pending' && b.advance_payment
+            ? 'Complete payment from My Bookings if checkout was interrupted.'
+            : 'Thank you — see details below.'}
+        </p>
+        {loading ? (
+          <div className="mt-8 flex justify-center">
+            <LoadingSpinner size="lg" />
           </div>
-        </div>
+        ) : (
+          <div className="mt-6 rounded-card bg-white p-6 text-left shadow">
+            <p className="text-xs font-bold uppercase tracking-wide text-zen-muted">Reference</p>
+            <p className="font-mono text-sm">{ref}</p>
+            <div className="mt-2">
+              <StatusBadge status={status} />
+            </div>
+            <hr className="my-4 border-slate-100" />
+            <dl className="space-y-2 text-sm">
+              <div>
+                <dt className="text-zen-muted">Class</dt>
+                <dd className="font-semibold text-zen-ink">{b.service_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-zen-muted">When</dt>
+                <dd className="font-semibold text-zen-ink">
+                  {dateStr} · {timeStr}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-zen-muted">Provider</dt>
+                <dd className="font-semibold text-zen-ink">{b.resource_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-zen-muted">Venue</dt>
+                <dd className="text-zen-ink">{b.location || '—'}</dd>
+              </div>
+              {b.advance_payment ? (
+                <div>
+                  <dt className="text-zen-muted">Payment</dt>
+                  <dd className="text-zen-ink">
+                    {pay === 'paid' ? 'Paid' : pay === 'pending' ? 'Payment pending' : pay || '—'}
+                    {b.payment_amount != null ? ` · ₹${Number(b.payment_amount).toLocaleString('en-IN')}` : ''}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          </div>
+        )}
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
           <Link
             to="/profile"

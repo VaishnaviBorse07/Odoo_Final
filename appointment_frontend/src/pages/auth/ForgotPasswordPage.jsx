@@ -40,7 +40,8 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     try {
       const { data } = await api.post('/auth/forgot-password', { email });
-      if (data.data?.otp_code) setDevOtpHint(data.data.otp_code);
+      if (data.data?.otp_code) setDevOtpHint(String(data.data.otp_code));
+      else setDevOtpHint('');
       setStep(2);
     } catch {
       setErr('Could not send OTP');

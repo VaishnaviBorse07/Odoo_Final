@@ -23,7 +23,7 @@ INSERT INTO appointment_types (
    8, TRUE, TRUE, 600.00, 'automatic', 'auto', replace(gen_random_uuid()::text, '-', '')),
   ((SELECT id FROM users WHERE email = 'meera@zenflow.com'), 'Guided Meditation',
    'Mindfulness and breath.', 45, 'Studio Hall B', 'published', 'weekly',
-   8, TRUE, FALSE, 0.00, 'automatic', 'auto', replace(gen_random_uuid()::text, '-', '')),
+   8, TRUE, TRUE, 150.00, 'automatic', 'auto', replace(gen_random_uuid()::text, '-', '')),
   ((SELECT id FROM users WHERE email = 'meera@zenflow.com'), 'Private Yoga Session',
    'One-on-one instruction.', 60, 'Studio Hall C', 'published', 'flexible',
    1, FALSE, TRUE, 1500.00, 'manual', 'manual', replace(gen_random_uuid()::text, '-', '')),
@@ -32,7 +32,7 @@ INSERT INTO appointment_types (
    20, TRUE, TRUE, 1200.00, 'automatic', 'auto', replace(gen_random_uuid()::text, '-', '')),
   ((SELECT id FROM users WHERE email = 'meera@zenflow.com'), 'Kids Yoga',
    'Fun yoga for children.', 45, 'Studio Hall A', 'unpublished', 'weekly',
-   12, TRUE, FALSE, 0.00, 'automatic', 'auto', replace(gen_random_uuid()::text, '-', ''));
+   12, TRUE, TRUE, 250.00, 'automatic', 'auto', replace(gen_random_uuid()::text, '-', ''));
 
 INSERT INTO resources (appointment_type_id, user_id, resource_name) VALUES
   ((SELECT id FROM appointment_types WHERE name = 'Morning Hatha Yoga'),

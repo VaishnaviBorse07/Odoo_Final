@@ -15,8 +15,7 @@ export default function CreateAppointmentPage() {
     slot_type: 'weekly',
     max_capacity: 10,
     manage_capacity: false,
-    advance_payment: false,
-    payment_amount: 0,
+    payment_amount: 100,
     confirmation_type: 'automatic',
     assignment_type: 'auto'
   });
@@ -105,23 +104,21 @@ export default function CreateAppointmentPage() {
               className="w-full rounded-control border px-3 py-2 text-sm"
             />
           )}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.advance_payment}
-              onChange={(e) => setForm({ ...form, advance_payment: e.target.checked })}
-            />
-            Advance payment
-          </label>
-          {form.advance_payment && (
+          <div>
+            <label className="text-sm font-semibold text-zen-ink">Booking fee (₹, required)</label>
+            <p className="mt-0.5 text-xs text-zen-muted">
+              Customers pay this amount via Razorpay before their booking is confirmed.
+            </p>
             <input
               type="number"
-              min={0}
+              min={1}
+              step={1}
+              required
               value={form.payment_amount}
               onChange={(e) => setForm({ ...form, payment_amount: Number(e.target.value) })}
-              className="w-full rounded-control border px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-control border px-3 py-2 text-sm"
             />
-          )}
+          </div>
           <button
             type="submit"
             disabled={loading}

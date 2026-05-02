@@ -8,14 +8,8 @@ logger = logging.getLogger(__name__)
 OtpType = Literal["email_verify", "forgot_password"]
 
 
-def log_otp(email: str, name: str, otp: str, otp_type: OtpType) -> None:
-    logger.warning(
-        "ZenFlow OTP [%s] email=%s name=%s code=%s (check server logs; no external mail)",
-        otp_type,
-        email,
-        name,
-        otp,
-    )
+def log_otp_dispatched(email: str, name: str, otp_type: OtpType) -> None:
+    logger.info("ZenFlow OTP [%s] dispatched to %s (%s)", otp_type, email, name)
 
 
 def dev_otp_fields(settings: Settings, otp: str) -> dict:
