@@ -22,7 +22,7 @@ export default function LoginPage() {
       const { data } = await api.post('/auth/login', { email, password });
       login(data.data.user, data.data.token);
       const role = data.data.user.role;
-      if (role === 'customer') nav('/', { replace: true });
+      if (role === 'customer') nav('/home', { replace: true });
       else if (role === 'organiser') nav('/organiser', { replace: true });
       else nav('/admin', { replace: true });
     } catch (err) {

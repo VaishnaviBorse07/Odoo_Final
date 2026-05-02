@@ -34,7 +34,7 @@ export default function ClassCard({ appointment }) {
         </span>
       </div>
       <p className="mt-2 line-clamp-2 text-sm text-zen-muted">{appointment.description || ' '}</p>
-      <p className="mt-3 text-sm text-zen-muted">📍 {appointment.location}</p>
+      <p className="mt-3 text-sm text-zen-muted">{appointment.location}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {resources.map((r) => (
           <span

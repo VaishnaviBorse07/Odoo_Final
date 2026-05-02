@@ -64,7 +64,7 @@ export default function OTPVerifyPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-slate-100 px-4">
       <div className="w-full max-w-md rounded-card bg-white p-8 text-center shadow-lg">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zen-secondary text-zen-primary">🔒</div>
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zen-secondary text-zen-primary"></div>
         <h1 className="text-2xl font-bold text-zen-ink">Verify your email</h1>
         <p className="mt-2 text-sm text-zen-muted">Code sent to {email}</p>
         {devOtpHint && (

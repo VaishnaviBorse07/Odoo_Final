@@ -1,5 +1,5 @@
-# Resource CRUD, working hours replace-all, flexible slots — exports router.
 from typing import Any, Optional
+from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel
@@ -131,16 +131,19 @@ async def replace_wh(
         if not await _owns_resource(conn, user, resource_id):
             return err_json("Forbidden or not found", 403)
         await conn.execute("DELETE FROM working_hours WHERE resource_id = $1", resource_id)
+
         for item in body:
+            st = datetime.strptime(item.start_time[:5], "%H:%M").time()
+            et = datetime.strptime(item.end_time[:5], "%H:%M").time()
             await conn.execute(
                 """
                 INSERT INTO working_hours (resource_id, day_of_week, start_time, end_time, is_available)
-                VALUES ($1,$2,$3::time,$4::time,$5)
+                VALUES ($1,$2,$3,$4,$5)
                 """,
                 resource_id,
                 item.day_of_week,
-                item.start_time,
-                item.end_time,
+                st,
+                et,
                 item.is_available,
             )
         rows = await conn.fetch(
@@ -171,15 +174,18 @@ async def add_flex(resource_id: int, body: FlexSlotBody, user: dict = Depends(re
         for ex in existing:
             if times_overlap(ns, ne, time_str_to_minutes(ex["start_time"]), time_str_to_minutes(ex["end_time"])):
                 return err_json("Overlapping flexible slot on that date", 409)
+        d_obj = datetime.strptime(body.slot_date, "%Y-%m-%d").date()
+        s_obj = datetime.strptime(body.start_time[:5], "%H:%M").time()
+        e_obj = datetime.strptime(body.end_time[:5], "%H:%M").time()
         sid = await conn.fetchval(
             """
             INSERT INTO flexible_slots (resource_id, slot_date, start_time, end_time, is_available)
-            VALUES ($1,$2::date,$3::time,$4::time,TRUE) RETURNING id
+            VALUES ($1,$2,$3,$4,TRUE) RETURNING id
             """,
             resource_id,
-            body.slot_date,
-            body.start_time,
-            body.end_time,
+            d_obj,
+            s_obj,
+            e_obj,
         )
         row = await conn.fetchrow("SELECT * FROM flexible_slots WHERE id = $1", sid)
     return ok_json(record_to_dict(row), "Created", 201)

@@ -11,17 +11,17 @@ export default function ProtectedRoute({ roles }) {
   }
 
   if (roles && !roles.includes(user.role)) {
-    if (user.role === 'customer') return <Navigate to="/" replace />;
+    if (user.role === 'customer') return <Navigate to="/home" replace />;
     if (user.role === 'organiser') return <Navigate to="/organiser" replace />;
     if (user.role === 'admin') return <Navigate to="/admin" replace />;
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   if (user.role === 'customer' && loc.pathname.startsWith('/organiser')) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/home" replace />;
   }
   if (user.role === 'customer' && loc.pathname.startsWith('/admin')) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/home" replace />;
   }
   if (user.role === 'organiser' && loc.pathname.startsWith('/admin')) {
     return <Navigate to="/organiser" replace />;

@@ -168,10 +168,10 @@ export default function ManageResourcesPage() {
                 </button>
                 {!isFlex && (
                   <Link
-                    to={`/organiser/resources/${r.id}/hours`}
-                    className="rounded-control bg-zen-secondary px-3 py-2 text-center text-xs font-bold text-zen-primary"
+                    to={`/organiser/resources/${r.id}/hours/${appointmentTypeId}`}
+                    className="rounded-control bg-zen-secondary px-3 py-2 text-center text-xs font-bold text-zen-primary hover:bg-[#0F6E56] hover:text-white transition-colors"
                   >
-                    Working hours
+                    ⏰ Working hours
                   </Link>
                 )}
               </div>

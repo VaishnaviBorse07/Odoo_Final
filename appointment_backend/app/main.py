@@ -49,7 +49,7 @@ async def validation_handler(request: Request, exc: RequestValidationError):
 @app.exception_handler(Exception)
 async def unhandled_handler(request: Request, exc: Exception):
     logger.exception("Unhandled API error on %s %s", request.method, request.url.path)
-    return JSONResponse({"success": False, "message": "Unexpected server error"}, status_code=500)
+    return JSONResponse({"success": False, "message": f"Unexpected server error: {str(exc)}"}, status_code=500)
 
 
 @app.get("/health")
