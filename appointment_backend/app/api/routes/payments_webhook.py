@@ -79,7 +79,7 @@ async def razorpay_webhook(request: Request, settings: Settings = Depends(get_se
                     WHERE order_id = $1 AND status NOT IN ('SUCCESS','FAILED')
                     """,
                     str(order_id),
-                    payload,
+                    json.dumps(payload),
                 )
         return ok_json(None, "OK")
     return ok_json({"ignored": True}, "OK")

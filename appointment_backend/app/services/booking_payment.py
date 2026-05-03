@@ -1,8 +1,8 @@
-# Shared Razorpay settlement: mark payment + booking (idempotent for verify + webhook races).
 from decimal import Decimal
 from typing import Any, Optional
 
 import asyncpg
+import json
 
 
 async def apply_successful_payment(
@@ -50,7 +50,7 @@ async def apply_successful_payment(
         """,
         pay_row["id"],
         razorpay_payment_id,
-        raw_payload,
+        json.dumps(raw_payload),
     )
     if row["payment_status"] != "paid":
         if row["advance_payment"] and row["confirmation_type"] == "automatic":

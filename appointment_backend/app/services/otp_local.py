@@ -1,4 +1,3 @@
-# Local OTP handling — no third-party email; logs OTP and optional dev-only API echo.
 import logging
 from typing import Literal
 

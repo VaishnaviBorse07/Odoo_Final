@@ -141,7 +141,7 @@ export default function LandingPage() {
               to="/signup"
               className="w-full sm:w-auto rounded-2xl bg-white px-8 py-4 text-base font-extrabold text-[#0F6E56] hover:bg-[#E1F5EE] transition-all shadow-xl hover:scale-105 active:scale-100"
             >
-              🧘 Get Started Free
+              Get Started Free
             </Link>
             <Link
               to="/login"
@@ -177,12 +177,12 @@ export default function LandingPage() {
             <p className="mt-3 text-gray-500 text-base max-w-xl mx-auto">A complete platform for yoga studios, instructors, and wellness seekers.</p>
           </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            <FeatureCard icon="📅" title="Smart Scheduling" desc="Weekly recurring or flexible date slots — the system finds available times automatically." />
-            <FeatureCard icon="💳" title="Secure Payments" desc="Integrated Razorpay payments with instant confirmation. Pay only when you book." />
-            <FeatureCard icon="📧" title="OTP Verification" desc="Email OTP ensures only verified users book sessions — zero spam, full security." />
-            <FeatureCard icon="👥" title="Multi-Capacity Classes" desc="Book for group classes or private 1-on-1 sessions with your favourite instructor." />
-            <FeatureCard icon="🔄" title="Easy Rescheduling" desc="Can't make it? Reschedule your booking in one tap. Full history maintained." />
-            <FeatureCard icon="📊" title="Organiser Dashboard" desc="Studio owners get reports, bookings overview, and resource management all in one." />
+            <FeatureCard icon="" title="Smart Scheduling" desc="Weekly recurring or flexible date slots — the system finds available times automatically." />
+            <FeatureCard icon="" title="Secure Payments" desc="Integrated Razorpay payments with instant confirmation. Pay only when you book." />
+            <FeatureCard icon="" title="OTP Verification" desc="Email OTP ensures only verified users book sessions — zero spam, full security." />
+            <FeatureCard icon="" title="Multi-Capacity Classes" desc="Book for group classes or private 1-on-1 sessions with your favourite instructor." />
+            <FeatureCard icon="" title="Easy Rescheduling" desc="Can't make it? Reschedule your booking in one tap. Full history maintained." />
+            <FeatureCard icon="" title="Organiser Dashboard" desc="Studio owners get reports, bookings overview, and resource management all in one." />
           </div>
         </div>
       </section>
@@ -249,12 +249,12 @@ export default function LandingPage() {
             <p className="mt-3 text-gray-500 text-base">Sign in to see all available sessions and book instantly.</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-4xl mx-auto">
-            <ClassPill icon="🧘" name="Morning Hatha Yoga" duration="60 min · Weekly" price="₹500" />
-            <ClassPill icon="🌀" name="Vinyasa Flow" duration="60 min · Weekly" price="₹600" />
-            <ClassPill icon="🌿" name="Guided Meditation" duration="45 min · Weekly" price="₹150" />
-            <ClassPill icon="⭐" name="Private Yoga Session" duration="60 min · Flexible" price="₹1,500" />
-            <ClassPill icon="🔥" name="Ashtanga Workshop" duration="90 min · Flexible" price="₹1,200" />
-            <ClassPill icon="🧒" name="Kids Yoga" duration="45 min · Weekly" price="₹250" />
+            <ClassPill icon="" name="Morning Hatha Yoga" duration="60 min · Weekly" price="₹500" />
+            <ClassPill icon="" name="Vinyasa Flow" duration="60 min · Weekly" price="₹600" />
+            <ClassPill icon="" name="Guided Meditation" duration="45 min · Weekly" price="₹150" />
+            <ClassPill icon="" name="Private Yoga Session" duration="60 min · Flexible" price="₹1,500" />
+            <ClassPill icon="" name="Ashtanga Workshop" duration="90 min · Flexible" price="₹1,200" />
+            <ClassPill icon="" name="Kids Yoga" duration="45 min · Weekly" price="₹250" />
           </div>
           <div className="text-center mt-10">
             <Link
@@ -292,7 +292,7 @@ export default function LandingPage() {
               to="/signup"
               className="w-full sm:w-auto rounded-2xl bg-white px-8 py-4 text-base font-extrabold text-[#0F6E56] hover:bg-[#E1F5EE] transition shadow-xl hover:scale-105"
             >
-              🧘 Create Free Account
+              Create Free Account
             </Link>
             <Link
               to="/login"

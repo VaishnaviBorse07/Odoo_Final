@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Razorpay (https://razorpay.com) — INR; Checkout supports UPI incl. Google Pay / PhonePe.
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
-    # Dashboard → Webhooks → signing secret (optional but recommended for /api/payments/razorpay-webhook).
+    # Dashboard → Webhooks → signing secret 
     razorpay_webhook_secret: str = ""
 
 
