@@ -1,4 +1,5 @@
 # ZenFlow FastAPI entrypoint — CORS, /api routes, DB pool lifecycle, unified error JSON.
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,12 +16,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+async def _cleanup_expired_holds():
+    """
+    Background task: deletes expired slot_holds every 60 seconds.
+    Keeps the table lean and ensures slots are freed promptly after timeout.
+    """
+    from app.db import pool as get_pool  # imported here to avoid circular at module load
+    while True:
+        try:
+            await asyncio.sleep(60)
+            async with get_pool().acquire() as conn:
+                n = await conn.fetchval(
+                    "DELETE FROM slot_holds WHERE expires_at <= NOW() RETURNING COUNT(*)"
+                )
+                if n:
+                    logger.info("Cleaned up %s expired slot hold(s)", n)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Slot hold cleanup error: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     await create_pool(settings.database_url)
-    yield
-    await close_pool()
+    cleanup_task = asyncio.create_task(_cleanup_expired_holds())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        await asyncio.gather(cleanup_task, return_exceptions=True)
+        await close_pool()
 
 
 app = FastAPI(title="ZenFlow API", lifespan=lifespan)

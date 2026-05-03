@@ -2,7 +2,7 @@
 import calendar
 import json
 import secrets
-from datetime import date as date_type, time as time_type
+from datetime import date as date_type, datetime as datetime_type, time as time_type, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -94,6 +94,7 @@ class CreateBooking(BaseModel):
     end_time: str
     capacity_booked: int = 1
     answers: list[AnswerItem] = Field(default_factory=list)
+    hold_id: Optional[int] = None  # Pass hold_id to consume a pre-existing slot hold
 
 
 @router.post("")
@@ -106,10 +107,22 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
         return err_json("Invalid booking time range", 400)
     async with pool().acquire() as conn:
         async with conn.transaction():
+            # ── CONCURRENCY GUARD ─────────────────────────────────────────────
+            # Acquire a transaction-scoped advisory lock keyed on
+            # (resource_id, yyyymmdd). Two concurrent requests for the same
+            # resource+day will be serialized here — the second waits until
+            # the first commits, then re-checks availability on real data.
+            _lock_day = int(bd.strftime("%Y%m%d"))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock($1, $2)",
+                body.resource_id,
+                _lock_day,
+            )
+            # ─────────────────────────────────────────────────────────────────
             apt = await conn.fetchrow(
                 """
                 SELECT id, confirmation_type, advance_payment, payment_amount,
-                       manage_capacity, max_capacity
+                       manage_capacity, max_capacity, hold_timeout_minutes
                 FROM appointment_types WHERE id = $1
                 """,
                 body.appointment_type_id,
@@ -124,36 +137,75 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
             ans_map = {a.question_id: (a.answer_text or "").strip() for a in body.answers}
             if not req_ids.issubset(ans_map.keys()) or any(not ans_map[qid] for qid in req_ids):
                 return err_json("Please answer all required questions", 400)
-            if apt["manage_capacity"]:
-                if cap < 1 or cap > (apt["max_capacity"] or 1):
-                    return err_json("Invalid capacity", 400)
-                booked_sum = await conn.fetchval(
+
+            # ── Hold verification ──────────────────────────────────────────────
+            # If customer passes a hold_id, verify it belongs to them and hasn't
+            # expired. A valid hold guarantees the slot — skip availability check.
+            hold_verified = False
+            if body.hold_id is not None:
+                hold_row = await conn.fetchrow(
                     """
-                    SELECT COALESCE(SUM(capacity_booked),0) FROM bookings
-                    WHERE resource_id = $1 AND booking_date = $2 AND status <> 'cancelled'
-                      AND start_time < $3::time AND end_time > $4::time
+                    SELECT id, resource_id, booking_date, start_time, end_time,
+                           capacity_held, expires_at
+                    FROM slot_holds
+                    WHERE id = $1 AND customer_id = $2
+                      AND appointment_type_id = $3
+                    """,
+                    body.hold_id,
+                    user["id"],
+                    body.appointment_type_id,
+                )
+                if not hold_row:
+                    return err_json("Hold not found. Please select a slot again.", 409)
+                now_utc = datetime_type.now(timezone.utc)
+                if hold_row["expires_at"].replace(tzinfo=timezone.utc) <= now_utc:
+                    # Expired — clean it up
+                    await conn.execute("DELETE FROM slot_holds WHERE id = $1", body.hold_id)
+                    return err_json(
+                        "Your reservation has expired. Please select a slot again.", 409
+                    )
+                # Validate slot matches the hold
+                if (
+                    hold_row["resource_id"] != body.resource_id
+                    or str(hold_row["booking_date"]) != body.booking_date[:10]
+                    or str(hold_row["start_time"])[:5] != body.start_time[:5]
+                ):
+                    return err_json("Hold slot does not match booking request.", 400)
+                hold_verified = True
+
+            if not hold_verified:
+                # No hold — run the normal availability check
+                if apt["manage_capacity"]:
+                    if cap < 1 or cap > (apt["max_capacity"] or 1):
+                        return err_json("Invalid capacity", 400)
+                    booked_sum = await conn.fetchval(
+                        """
+                        SELECT COALESCE(SUM(capacity_booked),0) FROM bookings
+                        WHERE resource_id = $1 AND booking_date = $2 AND status <> 'cancelled'
+                          AND start_time < $3::time AND end_time > $4::time
+                        """,
+                        body.resource_id,
+                        bd,
+                        et,
+                        st,
+                    )
+                    if int(booked_sum) + cap > (apt["max_capacity"] or 1):
+                        return err_json("Not enough spots available for the requested capacity", 409)
+                ok_slot = await conn.fetchval(
+                    """
+                    SELECT is_slot_available($1::int, $2::date, $3::time, $4::time, NULL::int,
+                      $5::int, $6::int, $7::int)
                     """,
                     body.resource_id,
                     bd,
-                    et,
                     st,
+                    et,
+                    body.appointment_type_id,
+                    cap,
+                    user["id"],
                 )
-                if int(booked_sum) + cap > (apt["max_capacity"] or 1):
-                    return err_json("Not enough spots available for the requested capacity", 409)
-            ok_slot = await conn.fetchval(
-                """
-                SELECT is_slot_available($1::int, $2::date, $3::time, $4::time, NULL::int,
-                  $5::int, $6::int)
-                """,
-                body.resource_id,
-                bd,
-                st,
-                et,
-                body.appointment_type_id,
-                cap,
-            )
-            if not ok_slot:
-                return err_json("This slot is no longer available. Please choose another slot.", 409)
+                if not ok_slot:
+                    return err_json("This slot is no longer available. Please choose another slot.", 409)
             if apt["advance_payment"]:
                 pay_stat = "pending"
                 pay_amt = float(apt["payment_amount"] or 0)
@@ -192,6 +244,25 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
                     a.question_id,
                     a.answer_text or "",
                 )
+            # For flexible (non-capacity-managed) slots: mark row unavailable
+            # so it won't appear as free to the next concurrent requester.
+            # Capacity-managed slots are excluded — they allow multiple bookings.
+            await conn.execute(
+                """
+                UPDATE flexible_slots
+                SET is_available = FALSE
+                WHERE resource_id = $1 AND slot_date = $2
+                  AND start_time = $3::time AND end_time = $4::time
+                  AND NOT EXISTS (
+                    SELECT 1 FROM appointment_types at2
+                    WHERE at2.id = $5 AND at2.manage_capacity = TRUE
+                  )
+                """,
+                body.resource_id, bd, st, et, body.appointment_type_id,
+            )
+            # ── Consume the hold now that booking is inserted ──────────────────
+            if body.hold_id is not None:
+                await conn.execute("DELETE FROM slot_holds WHERE id = $1", body.hold_id)
             detail = await conn.fetchrow(
                 "SELECT * FROM v_booking_details WHERE booking_id = $1",
                 bid,
@@ -204,6 +275,158 @@ async def create_booking(body: CreateBooking, user: dict = Depends(require_roles
         payload["id"] = bid
     return ok_json(payload, "Booked", 201)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Slot Hold endpoints  (BookMyShow-style reservation)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class HoldSlotBody(BaseModel):
+    appointment_type_id: int
+    resource_id: int
+    booking_date: str
+    start_time: str
+    end_time: str
+    capacity_held: int = 1
+
+
+@router.post("/hold")
+async def hold_slot(body: HoldSlotBody, user: dict = Depends(require_roles("customer"))):
+    """
+    Reserve a slot for the configured hold_timeout_minutes.
+    Returns hold_id + expires_at so the frontend can show a countdown.
+    Multiple holds by the same customer on different slots are allowed.
+    Only applies when advance_payment = TRUE on the appointment type.
+    """
+    bd = date_type.fromisoformat(body.booking_date[:10])
+    st = _parse_time(body.start_time)
+    et = _parse_time(body.end_time)
+    if et <= st:
+        return err_json("Invalid time range", 400)
+    cap = max(1, int(body.capacity_held or 1))
+
+    async with pool().acquire() as conn:
+        apt = await conn.fetchrow(
+            """
+            SELECT id, advance_payment, manage_capacity, max_capacity,
+                   COALESCE(hold_timeout_minutes, 10) AS hold_timeout_minutes
+            FROM appointment_types WHERE id = $1
+            """,
+            body.appointment_type_id,
+        )
+        if not apt:
+            return err_json("Appointment not found", 404)
+        if not apt["advance_payment"]:
+            return err_json("Slot holds are only for payment-required bookings", 400)
+
+        async with conn.transaction():
+            # Serialise concurrent hold requests for the same resource+date
+            _lock_day = int(bd.strftime("%Y%m%d"))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock($1, $2)",
+                body.resource_id,
+                _lock_day,
+            )
+            # Check slot availability (pass customer_id so their own hold doesn't block)
+            ok_slot = await conn.fetchval(
+                """
+                SELECT is_slot_available($1::int, $2::date, $3::time, $4::time,
+                  NULL::int, $5::int, $6::int, $7::int)
+                """,
+                body.resource_id,
+                bd,
+                st,
+                et,
+                body.appointment_type_id,
+                cap,
+                user["id"],
+            )
+            if not ok_slot:
+                return err_json(
+                    "This slot is currently unavailable or held by another customer.", 409
+                )
+            # Delete any previous (possibly expired) holds this customer has for this exact slot
+            await conn.execute(
+                """
+                DELETE FROM slot_holds
+                WHERE customer_id = $1 AND resource_id = $2
+                  AND booking_date = $3 AND start_time = $4::time
+                  AND appointment_type_id = $5
+                """,
+                user["id"],
+                body.resource_id,
+                bd,
+                st,
+                body.appointment_type_id,
+            )
+            timeout_min = int(apt["hold_timeout_minutes"])
+            hold_id = await conn.fetchval(
+                """
+                INSERT INTO slot_holds (
+                  customer_id, resource_id, booking_date, start_time, end_time,
+                  appointment_type_id, capacity_held, expires_at
+                ) VALUES (
+                  $1, $2, $3, $4::time, $5::time, $6, $7,
+                  NOW() + ($8 || ' minutes')::interval
+                )
+                RETURNING id
+                """,
+                user["id"],
+                body.resource_id,
+                bd,
+                st,
+                et,
+                body.appointment_type_id,
+                cap,
+                str(timeout_min),
+            )
+            hold_row = await conn.fetchrow(
+                "SELECT id, expires_at FROM slot_holds WHERE id = $1", hold_id
+            )
+    return ok_json(
+        {
+            "hold_id": hold_row["id"],
+            "expires_at": hold_row["expires_at"].isoformat(),
+            "hold_timeout_minutes": timeout_min,
+        },
+        "Slot reserved",
+        201,
+    )
+
+
+@router.delete("/hold/{hold_id}")
+async def release_hold(hold_id: int, user: dict = Depends(require_roles("customer"))):
+    """Release a slot hold early (user clicked Back or closed tab)."""
+    async with pool().acquire() as conn:
+        deleted = await conn.fetchval(
+            "DELETE FROM slot_holds WHERE id = $1 AND customer_id = $2 RETURNING id",
+            hold_id,
+            user["id"],
+        )
+    if not deleted:
+        return err_json("Hold not found", 404)
+    return ok_json(None, "Hold released")
+
+
+@router.get("/holds")
+async def my_holds(user: dict = Depends(require_roles("customer"))):
+    """Return all active (non-expired) holds for the current customer."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT sh.id, sh.resource_id, sh.booking_date, sh.start_time,
+                   sh.end_time, sh.appointment_type_id, sh.capacity_held,
+                   sh.expires_at, at.name AS appointment_name
+            FROM slot_holds sh
+            JOIN appointment_types at ON at.id = sh.appointment_type_id
+            WHERE sh.customer_id = $1 AND sh.expires_at > NOW()
+            ORDER BY sh.expires_at
+            """,
+            user["id"],
+        )
+    return ok_json({"holds": records_to_dicts(list(rows))})
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _razorpay_client(settings: Settings):
     if not (settings.razorpay_key_id and settings.razorpay_key_secret):
@@ -522,6 +745,14 @@ async def reschedule(booking_id: int, body: RescheduleBody, user: dict = Depends
                 return err_json("Not found", 404)
             if row["status"] not in ("confirmed", "pending", "rescheduled"):
                 return err_json("Cannot reschedule this booking", 400)
+            # ── CONCURRENCY GUARD for reschedule ──────────────────────────────
+            _lock_day = int(nd.strftime("%Y%m%d"))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock($1, $2)",
+                row["resource_id"],
+                _lock_day,
+            )
+            # ─────────────────────────────────────────────────────────────────
             cap = int(row["capacity_booked"] or 1)
             apt_id = row["appointment_type_id"]
             ok_slot = await conn.fetchval(
@@ -592,6 +823,24 @@ async def cancel_booking(booking_id: int, body: CancelBody, user: dict = Depends
             booking_id,
             body.cancellation_reason,
         )
+        # Restore flexible slot availability when a booking is cancelled
+        b_row = await conn.fetchrow(
+            "SELECT resource_id, booking_date, start_time, end_time FROM bookings WHERE id = $1",
+            booking_id,
+        )
+        if b_row:
+            await conn.execute(
+                """
+                UPDATE flexible_slots
+                SET is_available = TRUE
+                WHERE resource_id = $1 AND slot_date = $2
+                  AND start_time = $3::time AND end_time = $4::time
+                """,
+                b_row["resource_id"],
+                b_row["booking_date"],
+                b_row["start_time"],
+                b_row["end_time"],
+            )
         out = await conn.fetchrow("SELECT * FROM bookings WHERE id = $1", booking_id)
     return ok_json(record_to_dict(out))
 

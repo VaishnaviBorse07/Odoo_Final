@@ -33,7 +33,8 @@ export default function EditAppointmentPage() {
       manage_capacity: apt.manage_capacity,
       payment_amount: apt.payment_amount,
       confirmation_type: apt.confirmation_type,
-      assignment_type: apt.assignment_type
+      assignment_type: apt.assignment_type,
+      hold_timeout_minutes: apt.hold_timeout_minutes ?? 10
     });
     show('Saved', 'success');
   };
@@ -166,6 +167,21 @@ export default function EditAppointmentPage() {
               className="mt-1 w-full rounded-control border px-3 py-2 text-sm"
             />
             <p className="mt-1 text-xs text-zen-muted">Minimum ₹1 before publishing.</p>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase text-zen-muted">Slot hold window (minutes)</label>
+            <input
+              type="number"
+              min={2}
+              max={60}
+              step={1}
+              value={apt.hold_timeout_minutes ?? 10}
+              onChange={(e) => setApt({ ...apt, hold_timeout_minutes: Number(e.target.value) })}
+              className="mt-1 w-full rounded-control border px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-zen-muted">
+              After a customer selects a slot, they have this many minutes to complete payment before it is released. (2–60 min)
+            </p>
           </div>
           <div>
             <label className="text-xs font-bold uppercase text-zen-muted">Confirmation</label>

@@ -5,3 +5,92 @@
 body {
   font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
 }
+
+/* ── Slot Hold Timer ──────────────────────────────────────────────────────── */
+
+.hold-timer-banner {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: linear-gradient(90deg, #fffbeb, #fef3c7);
+  border-bottom: 2px solid #f59e0b;
+  padding: 0.5rem 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.hold-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1.5px solid #f59e0b;
+  border-radius: 999px;
+  padding: 0.35rem 1rem;
+  animation: hold-pulse 2s ease-in-out infinite;
+}
+
+.hold-timer--urgent {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #ef4444;
+  animation: hold-pulse-urgent 0.8s ease-in-out infinite;
+}
+
+.hold-timer--expired {
+  color: #6b7280;
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  animation: none;
+}
+
+.hold-timer__icon {
+  font-size: 1rem;
+}
+
+.hold-timer__label {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.hold-timer__countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+.hold-timer__digit {
+  display: inline-block;
+  min-width: 1.6ch;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.hold-timer__sep {
+  font-weight: 900;
+  font-size: 1rem;
+  opacity: 0.7;
+  margin: 0 1px;
+  animation: hold-blink 1s step-start infinite;
+}
+
+@keyframes hold-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+
+@keyframes hold-pulse-urgent {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50%       { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+@keyframes hold-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}

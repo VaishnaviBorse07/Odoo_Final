@@ -1,5 +1,4 @@
 -- ZenFlow: core schema — enums, tables, indexes for the booking system.
--- Safe to re-run: skips existing enums/tables/indexes (Supabase / local dev).
 -- Run order: 01_schema → 02_seed (once) → 03_views
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";

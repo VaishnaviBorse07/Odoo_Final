@@ -251,6 +251,7 @@ class UpdateAppointment(BaseModel):
     payment_amount: Optional[float] = Field(default=None, ge=1)
     confirmation_type: Optional[str] = None
     assignment_type: Optional[str] = None
+    hold_timeout_minutes: Optional[int] = Field(default=None, ge=2, le=60)
 
 
 @router.put("/{apt_id}")
@@ -279,6 +280,7 @@ async def update(apt_id: int, body: UpdateAppointment, user: dict = Depends(requ
             ("payment_amount", "numeric"),
             ("confirmation_type", "confirmation_type"),
             ("assignment_type", "assignment_type"),
+            ("hold_timeout_minutes", "int"),
         ]
         for key, cast in mapping:
             if key not in d:
